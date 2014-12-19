@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<BuildVersions>
+  
+   <Build Name="Base">
+        <TextReplacement FileName="a1.java" ReplacementID="main" toText="xyy" />
+        <TextReplacement FileName="a1.java" ReplacementID="class" toText="interface" />
+        
+        
+    </Build>
+    
+   
+      <Build Name="Algorithm with filter1">
+        <TextReplacement FileName="a1.java" ReplacementID="main" toText="xyyfilter1" />
+        <TextReplacement FileName="a1.java" ReplacementID="class" toText="interfacefilter1" />
+        
+        
+    </Build>
+   
+   <Build Name="filter2">
+        <TextReplacement FileName="a1.java" ReplacementID="main" toText="xyy2" />
+        <TextReplacement FileName="a1.java" ReplacementID="class" toText="interface3" />
+        
+        
+    </Build>
+      
+   
+    <Build Name="filter3">
+        <TextReplacement FileName="a1.java" ReplacementID="main" toText="xyy3" />
+        <TextReplacement FileName="a1.java" ReplacementID="class" toText="interface3" />
+        
+        
+    </Build>
+    
+    
+    
+</BuildVersions>
