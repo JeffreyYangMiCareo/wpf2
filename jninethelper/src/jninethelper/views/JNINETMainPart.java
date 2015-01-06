@@ -6,13 +6,22 @@ package jninethelper.views;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.lang.reflect.InvocationTargetException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.CopyOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+
+import javax.swing.JOptionPane;
+import javax.xml.bind.JAXBContext;
+import javax.xml.bind.Unmarshaller;
 
 import jninethelper.Activator;
 //
@@ -25,19 +34,36 @@ import jninethelper.Activator;
 import net.sf.jni4net.Bridge;
 
 import org.apache.commons.io.FilenameUtils;
+import org.eclipse.core.resources.IBuildConfiguration;
 import org.eclipse.core.resources.IContainer;
 import org.eclipse.core.resources.IFile;
+import org.eclipse.core.resources.IFolder;
 import org.eclipse.core.resources.IProject;
+import org.eclipse.core.resources.IProjectNature;
 import org.eclipse.core.resources.IResource;
+import org.eclipse.core.resources.IWorkspaceRoot;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.CoreException;
+import org.eclipse.core.runtime.IPath;
+import org.eclipse.core.runtime.Preferences;
+import org.eclipse.core.runtime.preferences.IEclipsePreferences;
+import org.eclipse.core.runtime.preferences.InstanceScope;
+import org.eclipse.jdt.core.IJavaProject;
+import org.eclipse.jdt.core.IPackageFragment;
+import org.eclipse.jdt.core.IPackageFragmentRoot;
+import org.eclipse.jdt.core.IType;
+import org.eclipse.jdt.core.JavaCore;
+import org.eclipse.jdt.ui.jarpackager.IJarExportRunnable;
+import org.eclipse.jdt.ui.jarpackager.JarPackageData;
 import org.eclipse.jface.action.IMenuManager;
 import org.eclipse.jface.action.IToolBarManager;
 import org.eclipse.jface.dialogs.MessageDialog;
+import org.eclipse.jface.dialogs.ProgressMonitorDialog;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.events.SelectionAdapter;
 import org.eclipse.swt.events.SelectionEvent;
 import org.eclipse.swt.widgets.Button;
+import org.eclipse.swt.widgets.Combo;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.FileDialog;
@@ -46,13 +72,20 @@ import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.ui.IEditorPart;
 import org.eclipse.ui.IFileEditorInput;
+import org.eclipse.ui.IMemento;
+import org.eclipse.ui.IViewSite;
+import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.forms.widgets.FormToolkit;
 import org.eclipse.ui.part.ViewPart;
-import org.eclipse.swt.widgets.Combo;
 
+import eclipse_net_lib.XML2JavaCodeGenerator;
 
+import org.eclipse.swt.widgets.TabFolder;
+import org.eclipse.swt.widgets.TabItem;
+import org.eclipse.swt.layout.FillLayout; 
 
+import static java.nio.file.StandardCopyOption.* ;
 
 
 
@@ -60,9 +93,9 @@ import org.eclipse.swt.widgets.Combo;
 
 public class JNINETMainPart extends ViewPart {
 
+	
 	public static final String ID = "jniplugin.views.MyFormPart"; //$NON-NLS-1$
 	private final FormToolkit toolkit = new FormToolkit(Display.getCurrent());
-	private Text txtDllPath;
 	private Button chkDeleteAllFirst ;
 	private Button chkKeepJNINetSystemFile ;
 	private Button chkAddSystemFile ;
@@ -86,16 +119,80 @@ public class JNINETMainPart extends ViewPart {
 	private File jni4net_jarStream ;	
 	private File jni4net_dllStream ;	
 	private File jni4net_x64_dllStream ;	
-	private Text txtAdditionalFiles;
  
 	Combo cboCurrentBuildConfig ;
 	Combo cboTargetBuildConfig ;
+	Combo cboCopyTargetFolder ;
+	Combo cboExtension ;
+	Combo cboMultiBuildTargetFolder ;
+	Button chkUseDetectedOutputExtension  ;
 	
     
-	List<TextReplacement> lst ;
+	//List<TextReplacement> lst ;
+	
+	BuildVersions bv ;
+	private Text text;
+	private Text txtDllPath;
+	
+	IMemento memento ;
+	
+	
+//	@Override
+//	public void init(IViewSite site) throws PartInitException {
+//		// TODO Auto-generated method stub
+//		super.init(site);
+//	}
+
+
+	@Override
+	public void init(IViewSite site, IMemento memento) throws PartInitException {
+		// TODO Auto-generated method stub
+		super.init(site, memento);
+		
+	
+		if ( memento == null )
+			return ;
+        
+        this.memento = memento ;
+        if ( this.memento == null)
+    	    JOptionPane.showMessageDialog(null, "memento is null", "", 1 );
+
+		//this.memento = memento ;
+		
+		
+		
+		
+	}
+
+
+	@Override
+	public void saveState(IMemento memento) {
+		
+	    //JOptionPane.showMessageDialog(null, "saveState", "saveState", 1 );
+		
+		super.saveState(memento);
+		
+		if ( memento == null )
+			return ;
+
+		
+	    //this.memento = memento.createChild("selection");
+		memento.putString( KEY_TARGET_PATH, this.txtDllPath.getText() );
+		memento.putString (KEY_COPY_TARGET_FOLDER, this.cboCopyTargetFolder.getText() );
+		memento.putString(KEY_FILE_EXTENSION, this.cboExtension.getText());
+		
+		memento.putString(KEY_TARGET_BUILD_CONFIG, this.cboTargetBuildConfig.getText());
+		memento.putString(KEY_MULTIBUILD_TARGET_FOLDER, this.cboMultiBuildTargetFolder.getText());
+
+		
+	}
 
 	
+	
+
 	public JNINETMainPart () {
+				
+		
 	}
 
 	
@@ -194,19 +291,358 @@ public class JNINETMainPart extends ViewPart {
 	public void createPartControl(Composite parent) {
 		Composite container = toolkit.createComposite(parent, SWT.NONE);
 		toolkit.paintBordersFor(container);
+		container.setLayout(new FillLayout(SWT.HORIZONTAL));
 		
-		Label lblNewLabel = new Label(container, SWT.NONE);
-		lblNewLabel.setBounds(32, 10, 69, 15);
-		toolkit.adapt(lblNewLabel, true, true);
-		lblNewLabel.setText("Source DLL");
+		TabFolder tabFolder = new TabFolder(container, SWT.NONE);
+		toolkit.adapt(tabFolder);
+		toolkit.paintBordersFor(tabFolder);
 		
-		txtDllPath = new Text(container, SWT.BORDER);
+		TabItem tbtmJninet = new TabItem(tabFolder, SWT.NONE);
+		tbtmJninet.setText("JNINET");
+		
+		Composite composite = new Composite(tabFolder, SWT.NONE);
+		tbtmJninet.setControl(composite);
+		toolkit.paintBordersFor(composite);
+		
+		text = new Text(composite, SWT.BORDER);
+		text.setBounds(110, 46, 298, 21);
+		toolkit.adapt(text, true, true);
+		
+		Label label = new Label(composite, SWT.NONE);
+		label.setText("Additional files");
+		label.setBounds(10, 49, 94, 15);
+		toolkit.adapt(label, true, true);
+		
+		
+		Button btnBrowseDLL = new Button(composite, SWT.NONE);
+		btnBrowseDLL.addSelectionListener(btnBrowseDLLListener());
+		btnBrowseDLL.setBounds(388, 13, 20, 15);
+		toolkit.adapt(btnBrowseDLL, true, true);
+		btnBrowseDLL.setText("...");
+		
+		
+		
+		txtDllPath = new Text(composite, SWT.BORDER);
 		txtDllPath.setText("S:\\1\\work\\workdll\\ClassLibrary2.dll");
-		txtDllPath.setBounds(122, 7, 282, 21);
+		txtDllPath.setBounds(100, 10, 282, 21);
 		toolkit.adapt(txtDllPath, true, true);
 		
-		Button btnAddDllSupportFiles = new Button(container, SWT.NONE);
-		btnAddDllSupportFiles.addSelectionListener(new SelectionAdapter() {
+		Label label_1 = new Label(composite, SWT.NONE);
+		label_1.setText("Source DLL");
+		label_1.setBounds(10, 13, 69, 15);
+		toolkit.adapt(label_1, true, true);
+		
+		chkAddSystemFile = new Button(composite, SWT.CHECK);
+		chkAddSystemFile.setBounds(555, 48, 93, 16);
+		toolkit.adapt(chkAddSystemFile, true, true);
+		chkAddSystemFile.setText("Add system files");
+		
+		chkDeleteAllFirst = new Button(composite, SWT.CHECK);
+		chkDeleteAllFirst.setBounds(461, 48, 75, 16);
+		toolkit.adapt(chkDeleteAllFirst, true, true);
+		chkDeleteAllFirst.setText("Delete first");
+		
+		Button btnUpdateDllFile = new Button(composite, SWT.NONE);
+		btnUpdateDllFile.setBounds(402, 128, 115, 25);
+		btnUpdateDllFile.addSelectionListener(btnUpdateDllFileListener());
+		toolkit.adapt(btnUpdateDllFile, true, true);
+		btnUpdateDllFile.setText("Update DLL file");
+		
+		Button btnRemoveDllSupportFile = new Button(composite, SWT.NONE);
+		btnRemoveDllSupportFile.setBounds(228, 128, 141, 25);
+		btnRemoveDllSupportFile.addSelectionListener(btnRemoveDllSupportFileListener());
+		toolkit.adapt(btnRemoveDllSupportFile, true, true);
+		btnRemoveDllSupportFile.setText("Remove Dll Support Files");
+		
+		Button btnAddDllSupportFiles = new Button(composite, SWT.NONE);
+		btnAddDllSupportFiles.setBounds(44, 128, 126, 25);
+		btnAddDllSupportFiles.addSelectionListener(btnAddDllSupportFilesListener());
+		toolkit.adapt(btnAddDllSupportFiles, true, true);
+		btnAddDllSupportFiles.setText("Add DLL Support files");
+		
+		chkKeepJNINetSystemFile = new Button(composite, SWT.CHECK);
+		chkKeepJNINetSystemFile.setBounds(686, 48, 109, 16);
+		toolkit.adapt(chkKeepJNINetSystemFile, true, true);
+		chkKeepJNINetSystemFile.setText("Keep System File");
+		
+		TabItem tbtmMultiBuild = new TabItem(tabFolder, SWT.NONE);
+		tbtmMultiBuild.setText("Multi Build");
+		
+		Composite composite_1 = new Composite(tabFolder, SWT.NONE);
+		tbtmMultiBuild.setControl(composite_1);
+		toolkit.paintBordersFor(composite_1);
+		
+		Label lblNewLabel_2 = new Label(composite_1, SWT.NONE);
+		lblNewLabel_2.setBounds(33, 60, 121, 15);
+		toolkit.adapt(lblNewLabel_2, true, true);
+		lblNewLabel_2.setText("Current config");
+		
+		cboCurrentBuildConfig = new Combo(composite_1, SWT.NONE);
+		cboCurrentBuildConfig.setBounds(33, 91, 182, 23);
+		toolkit.adapt(cboCurrentBuildConfig);
+		toolkit.paintBordersFor(cboCurrentBuildConfig);
+		
+		cboTargetBuildConfig = new Combo(composite_1, SWT.NONE);
+		cboTargetBuildConfig.setBounds(292, 91, 158, 23);
+		toolkit.adapt(cboTargetBuildConfig);
+		toolkit.paintBordersFor(cboTargetBuildConfig);
+		
+		Label lblNewLabel_3 = new Label(composite_1, SWT.NONE);
+		lblNewLabel_3.setBounds(292, 60, 108, 15);
+		toolkit.adapt(lblNewLabel_3, true, true);
+		lblNewLabel_3.setText("Target config");
+		
+		Button btnParseConfig = new Button(composite_1, SWT.NONE);
+		btnParseConfig.setBounds(33, 21, 93, 25);
+		btnParseConfig.addSelectionListener(btnParseConfigListener());
+		toolkit.adapt(btnParseConfig, true, true);
+		btnParseConfig.setText("Parse Config");
+		
+		Button btnExecuteBuildConfigChange = new Button(composite_1, SWT.NONE);
+		btnExecuteBuildConfigChange.addSelectionListener(btnExecuteBuildConfigChangeListener());
+		btnExecuteBuildConfigChange.setBounds(145, 21, 158, 25);
+		toolkit.adapt(btnExecuteBuildConfigChange, true, true);
+		btnExecuteBuildConfigChange.setText("Execute  config update");
+		
+		cboMultiBuildTargetFolder = new Combo(composite_1, SWT.NONE);
+		cboMultiBuildTargetFolder.setItems(new String[] {"f:\\public", "\\\\192.168.1.200\\RD-Public\\JeffreyYang", "C:\\Users\\jy\\Google Drive\\DEV", "C:\\Users\\JeffreyYang\\Google Drive"});
+		cboMultiBuildTargetFolder.setBounds(324, 169, 440, 23);
+		toolkit.adapt(cboMultiBuildTargetFolder);
+		toolkit.paintBordersFor(cboMultiBuildTargetFolder);
+		
+		Label label_3 = new Label(composite_1, SWT.NONE);
+		label_3.setText("Target Folder");
+		label_3.setBounds(211, 172, 79, 15);
+		toolkit.adapt(label_3, true, true);
+		
+		Button btnCopyMultiBuildOutput2 = new Button(composite_1, SWT.NONE);
+		btnCopyMultiBuildOutput2.addSelectionListener(btnCopyMultiBuildOutput2Listener());
+		btnCopyMultiBuildOutput2.setText("Copy project output to ");
+		btnCopyMultiBuildOutput2.setBounds(23, 167, 154, 25);
+		toolkit.adapt(btnCopyMultiBuildOutput2, true, true);
+		
+		
+		
+		TabItem tbtmTest = new TabItem(tabFolder, SWT.NONE);
+		
+		
+		
+		tbtmTest.setText("Test");
+		
+		
+		
+		composite_2 = new Composite(tabFolder, SWT.NONE);
+		tbtmTest.setControl(composite_2);
+		toolkit.paintBordersFor(composite_2);
+		
+		Button btnTest = new Button(composite_2, SWT.NONE);
+		btnTest.setBounds(10, 10, 75, 25);
+		toolkit.adapt(btnTest, true, true);
+		btnTest.setText("Test");
+		
+		Button btnTest1 = new Button(composite_2, SWT.NONE);
+		btnTest1.setBounds(91, 10, 75, 25);
+		btnTest1.addSelectionListener(btnTest1Listener());
+		toolkit.adapt(btnTest1, true, true);
+		btnTest1.setText("Test1");
+		
+		Button btnRestorePrefValus = new Button(composite_2, SWT.NONE);
+		btnRestorePrefValus.addSelectionListener(new SelectionAdapter() {
+			@Override
+			public void widgetSelected(SelectionEvent e) {
+				RestoreCurrentValue () ;
+			}
+		});
+		btnRestorePrefValus.setBounds(172, 10, 103, 25);
+		toolkit.adapt(btnRestorePrefValus, true, true);
+		btnRestorePrefValus.setText("Restore values");
+		
+		TabItem tbtmMisc = new TabItem(tabFolder, SWT.NONE);
+		tbtmMisc.setText("Misc");
+		
+		Composite compositeMisc = new Composite(tabFolder, SWT.NONE);
+		tbtmMisc.setControl(compositeMisc);
+		toolkit.paintBordersFor(compositeMisc);
+		
+		Button btnCopyOutput2 = new Button(compositeMisc, SWT.NONE);
+		SelectionAdapter btnCopyOutput2Listener = btnCopyOutput2ListenerDelegate();
+		btnCopyOutput2.addSelectionListener(btnCopyOutput2Listener);
+		btnCopyOutput2.setBounds(42, 39, 154, 25);
+		toolkit.adapt(btnCopyOutput2, true, true);
+		btnCopyOutput2.setText("Copy project output to ");
+		
+		Button btnRenamePackage = new Button(compositeMisc, SWT.NONE);
+		btnRenamePackage.setBounds(42, 172, 125, 25);
+		toolkit.adapt(btnRenamePackage, true, true);
+		btnRenamePackage.setText("Rename package");
+		
+		Label lblTargetFolder = new Label(compositeMisc, SWT.NONE);
+		lblTargetFolder.setBounds(230, 44, 79, 15);
+		toolkit.adapt(lblTargetFolder, true, true);
+		lblTargetFolder.setText("Target Folder");
+		
+		cboCopyTargetFolder = new Combo(compositeMisc, SWT.NONE);
+		cboCopyTargetFolder.setItems(new String[] {"f:\\public", "\\\\192.168.1.200\\RD-Public\\JeffreyYang", "C:\\Users\\jy\\Google Drive\\DEV", "C:\\Users\\JeffreyYang\\Google Drive"});
+		cboCopyTargetFolder.setBounds(343, 41, 440, 23);
+		toolkit.adapt(cboCopyTargetFolder);
+		toolkit.paintBordersFor(cboCopyTargetFolder);
+		
+		Label lblExtension = new Label(compositeMisc, SWT.NONE);
+		lblExtension.setBounds(230, 75, 55, 15);
+		toolkit.adapt(lblExtension, true, true);
+		lblExtension.setText("Extension");
+		
+		cboExtension = new Combo(compositeMisc, SWT.NONE);
+		cboExtension.setItems(new String[] {"jar", "apk", "exe"});
+		cboExtension.setBounds(343, 70, 91, 23);
+		toolkit.adapt(cboExtension);
+		toolkit.paintBordersFor(cboExtension);
+		
+		chkUseDetectedOutputExtension = new Button(compositeMisc, SWT.CHECK);
+		chkUseDetectedOutputExtension.setSelection(true);
+		chkUseDetectedOutputExtension.setBounds(488, 75, 196, 16);
+		toolkit.adapt(chkUseDetectedOutputExtension, true, true);
+		chkUseDetectedOutputExtension.setText("Use detected output extension");
+
+		createActions();
+		initializeToolBar();
+		initializeMenu();
+		
+		
+		if ( memento.getString(KEY_TARGET_PATH)  != null ) this.txtDllPath.setText( memento.getString(KEY_TARGET_PATH) );
+		if ( memento.getString(KEY_COPY_TARGET_FOLDER)  != null ) this.cboCopyTargetFolder.setText( memento.getString(KEY_COPY_TARGET_FOLDER) );
+		if ( memento.getString(KEY_FILE_EXTENSION)  != null ) this.cboExtension.setText( memento.getString(KEY_FILE_EXTENSION) );
+		  
+		if ( memento.getString(KEY_TARGET_BUILD_CONFIG)  != null ) this.cboTargetBuildConfig.setText( memento.getString(KEY_TARGET_BUILD_CONFIG ) );
+		if ( memento.getString(KEY_MULTIBUILD_TARGET_FOLDER)  != null ) this.cboMultiBuildTargetFolder.setText( memento.getString(KEY_MULTIBUILD_TARGET_FOLDER ) );
+
+		
+//		RestoreCurrentValue () ;
+	}
+
+
+	private SelectionAdapter btnRemoveDllSupportFileListener() {
+		return new SelectionAdapter() {
+			@Override
+			public void widgetSelected(SelectionEvent e) {
+				
+				
+				
+		        try{
+		        	
+					
+		        	getInteropFiles () ;
+		            dll.delete(true, null );
+		            j4ndll.delete(true, null );
+		            j4njar.delete(true, null );
+		            if ( !chkKeepJNINetSystemFile.getSelection() ) jni4net_jar.delete(true, null );
+		            if ( !chkKeepJNINetSystemFile.getSelection() ) jni4net_dll.delete(true, null );
+		            if ( !chkKeepJNINetSystemFile.getSelection() ) jni4net_x64_dll.delete(true, null );
+
+		            
+		             
+		    		
+					
+		        }catch(Exception exp){
+		            exp.printStackTrace();
+		        }					
+			    SaveCurrentValue () ;
+				
+				
+			}
+		};
+	}
+
+
+	private SelectionAdapter btnBrowseDLLListener() {
+		return new SelectionAdapter() {
+			@Override
+			public void widgetSelected(SelectionEvent e) {
+				
+			    Shell shell = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getShell();
+			    FileDialog dialog = new FileDialog(shell, SWT.OPEN);
+			    dialog
+			        .setFilterNames(new String[] { "NET Assembly", "All Files (*.*)" });
+			    dialog.setFilterExtensions(new String[] { "*.dll", "*.*" }); 
+			    String path = txtDllPath.getText() ;
+			    path = FilenameUtils.getFullPathNoEndSeparator(  path ) ;
+			    dialog.setFilterPath(path); // Windows path
+			    //dialog.setFileName("fred.bat");
+			    String str1 =  dialog.open();		
+			    if ( str1.length() > 0)
+			    	txtDllPath.setText(  str1  );
+			    SaveCurrentValue () ;
+			    
+			}
+		};
+	}
+
+
+	private SelectionAdapter btnUpdateDllFileListener() {
+		return new SelectionAdapter() {
+			@Override
+			public void widgetSelected(SelectionEvent e) {
+			
+				
+		        try{
+		        	
+					
+		        	getInteropFiles () ;
+		        	
+		            dll.delete(true, null );
+
+		            dll.create(new FileInputStream(dllStream), true, null);
+			             
+		             
+		    		
+					
+		        }catch(Exception exp){
+		            exp.printStackTrace();
+		        }					
+			    SaveCurrentValue () ;
+			
+			
+			
+			}
+		};
+	}
+
+
+	private SelectionAdapter btnExecuteBuildConfigChangeListener() {
+		return new SelectionAdapter() {
+			@Override
+			public void widgetSelected(SelectionEvent e) {
+				
+				
+				try
+				{
+					Build fromBuild = null, toBuild = null  ;
+					
+					for ( Build b : bv.lstBuild)
+						if ( b.Name.equals(cboCurrentBuildConfig.getText() ) )
+							fromBuild = b;
+						else if  ( b.Name.equals( cboTargetBuildConfig.getText() ) )
+							toBuild = b;
+							
+							
+					
+					
+					processContainer (getActiveProject (),  fromBuild, toBuild ) ;
+					
+					
+				} catch (Exception e1) {
+					// TODO Auto-generated catch block
+					e1.printStackTrace();
+				}
+			    SaveCurrentValue () ;
+				
+			}
+		};
+	}
+
+
+	private SelectionAdapter btnAddDllSupportFilesListener() {
+		return new SelectionAdapter() {
 			@Override
 			public void widgetSelected(SelectionEvent e) {
 				
@@ -251,199 +687,190 @@ public class JNINETMainPart extends ViewPart {
 		            exp.printStackTrace();
 		        }					
 				
+			    SaveCurrentValue () ;
 				
 				
 				
 				
 			}
-		});
-		btnAddDllSupportFiles.setBounds(32, 64, 126, 25);
-		toolkit.adapt(btnAddDllSupportFiles, true, true);
-		btnAddDllSupportFiles.setText("Add DLL Support files");
-		
-		Button btnRemoveDllSupportFile = new Button(container, SWT.NONE);
-		btnRemoveDllSupportFile.addSelectionListener(new SelectionAdapter() {
+		};
+	}
+
+
+	private SelectionAdapter btnParseConfigListener() {
+		return new SelectionAdapter() {
 			@Override
 			public void widgetSelected(SelectionEvent e) {
-				
-				
-				
-		        try{
-		        	
+				try {
+	
 					
-		        	getInteropFiles () ;
-		            dll.delete(true, null );
-		            j4ndll.delete(true, null );
-		            j4njar.delete(true, null );
-		            if ( !chkKeepJNINetSystemFile.getSelection() ) jni4net_jar.delete(true, null );
-		            if ( !chkKeepJNINetSystemFile.getSelection() ) jni4net_dll.delete(true, null );
-		            if ( !chkKeepJNINetSystemFile.getSelection() ) jni4net_x64_dll.delete(true, null );
+//			      	File file = new File( getActiveProject ().getFile("BuildParam.xml").getRawLocation ().toOSString()  );
+//			        JAXBContext jaxbContext = JAXBContext.newInstance(BuildVersions.class);
+//			        Unmarshaller jaxbUnmarshaller = jaxbContext.createUnmarshaller();
+//			        jaxbUnmarshaller.unmarshal(file); 
+//			        bv = (BuildVersions) jaxbUnmarshaller.unmarshal(file);
+//					
+//					
+//					for ( Build b : bv.getBuilds() )
+//					{
+//						cboCurrentBuildConfig.add (b.getName() ) ;
+//						cboTargetBuildConfig.add (b.getName() ) ;
+//						
+//					}
+//
+					
+			        
+	
+					IFile ifile = getActiveProject ().getFile("BuildParam.xml") ;
+					if ( !ifile.exists())
+					{
+						
+			            MessageDialog.openInformation( PlatformUI.getWorkbench().getActiveWorkbenchWindow().getShell(), "Config file not found!!!", "BuildParam.xml does not exist, pleae create one in the project root"  );
+			            return ;
+			            
+					}
 
-		            
-		             
-		    		
-					
-		        }catch(Exception exp){
-		            exp.printStackTrace();
-		        }					
-				
-				
-			}
-		});
-		btnRemoveDllSupportFile.setBounds(32, 95, 141, 25);
-		toolkit.adapt(btnRemoveDllSupportFile, true, true);
-		btnRemoveDllSupportFile.setText("Remove Dll Support Files");
-		
-		Button btnUpdateDllFile = new Button(container, SWT.NONE);
-		btnUpdateDllFile.addSelectionListener(new SelectionAdapter() {
-			@Override
-			public void widgetSelected(SelectionEvent e) {
-			
-				
-		        try{
-		        	
-					
-		        	getInteropFiles () ;
-		        	
-		            dll.delete(true, null );
+					bv = ObjectFromXML.objectFromJABX( ifile.getRawLocation ().toOSString(), BuildVersions.class ) ;
 
-		            dll.create(new FileInputStream(dllStream), true, null);
-			             
-		             
-		    		
-					
-		        }catch(Exception exp){
-		            exp.printStackTrace();
-		        }					
-				
-			
+					for ( Build b : bv.lstBuild )
+					{
+						cboCurrentBuildConfig.add (b.Name) ;
+						cboTargetBuildConfig.add (b.Name) ;
+						
+					}
+				} catch (Exception e1) {
+					// TODO Auto-generated catch block
+					e1.printStackTrace();
+				}
+			    SaveCurrentValue () ;
+
 			
 			}
-		});
-		btnUpdateDllFile.setBounds(32, 126, 115, 25);
-		toolkit.adapt(btnUpdateDllFile, true, true);
-		btnUpdateDllFile.setText("Update DLL file");
-		
-		Button btnBrowseDLL = new Button(container, SWT.NONE);
-		btnBrowseDLL.addSelectionListener(new SelectionAdapter() {
+		};
+	}
+
+
+	private SelectionAdapter btnCopyMultiBuildOutput2Listener() {
+		return new SelectionAdapter() {
 			@Override
 			public void widgetSelected(SelectionEvent e) {
 				
-			    Shell shell = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getShell();
-			    FileDialog dialog = new FileDialog(shell, SWT.OPEN);
-			    dialog
-			        .setFilterNames(new String[] { "NET Assembly", "All Files (*.*)" });
-			    dialog.setFilterExtensions(new String[] { "*.dll", "*.*" }); 
-			    String path = txtDllPath.getText() ;
-			    path = FilenameUtils.getFullPathNoEndSeparator(  path ) ;
-			    dialog.setFilterPath(path); // Windows path
-			    //dialog.setFileName("fred.bat");
-			    String str1 =  dialog.open();		
-			    if ( str1.length() > 0)
-			    	txtDllPath.setText(  str1  );
-
-			    
-			}
-		});
-		btnBrowseDLL.setBounds(410, 10, 20, 15);
-		toolkit.adapt(btnBrowseDLL, true, true);
-		btnBrowseDLL.setText("...");
-		
-		Button btnTest = new Button(container, SWT.NONE);
-		btnTest.addSelectionListener(new SelectionAdapter() {
-			@Override
-			public void widgetSelected(SelectionEvent e) {
-
 				try
+				{
+					
+				    String TargetFolder = cboMultiBuildTargetFolder.getText() ; 
+				    
+					
+					IProject project = getActiveProject () ;
+	
+					Build fromBuild = null, toBuild = null  ;
+					
+					for ( Build b : bv.lstBuild)
+						if ( b.Name.equals(cboCurrentBuildConfig.getText() ) )
+							fromBuild = b;
+						else if  ( b.Name.equals( cboTargetBuildConfig.getText() ) )
+							toBuild = b;
+					
+					
+					
+					IFile f = project.getFile("/bin/" + project.getName() + "." +  toBuild.BuildOutput.substring(toBuild.BuildOutput.lastIndexOf('.') ) ) ;
+				    String fileName =  f.getRawLocation().toOSString() ; 
+	
+					    
+			        File source = new File( fileName );
+
+								
+			        
+			        
+			        File dest = new File( String.format("%s\\%s", TargetFolder, toBuild.BuildOutput ));
+			 
+			        Files.copy(source.toPath(), dest.toPath(), REPLACE_EXISTING);
+				    JOptionPane.showMessageDialog(null, "done", "Success", 1 );
+		        
+		 
+		        }catch(IOException exp){
+		            exp.printStackTrace();
+		        }					
+			    SaveCurrentValue () ;
+			
 				
-				{
-					
-				 	Bridge.init();
-
-			        Bridge.LoadAndRegisterAssemblyFrom(new java.io.File("S:\\JavaDev\\jninethelper\\jni4net.n-0.8.8.0.dll"));
-			    
-			        
-			        
-			    	Bridge.init();
-			    	
-			    	
-			        //Bridge.LoadAndRegisterAssemblyFrom(new java.io.File("S:\\JavaDev\\jninethelper\\ClassLibNoUI.j4n.dll"));
-			        
-			    	
-			    	
-			        Bridge.LoadAndRegisterAssemblyFrom(new java.io.File("S:\\JavaDev\\jninethelper\\ClassLibrary2.j4n.dll"));
-			        //Form1 f = new Form1 ( ) ;
-			        classlibrary2.Class1 f = new classlibrary2.Class1  () ;
-			        f.SayHello() ;
-			        //f.ShowWin(); 
-
-//
-//			        Bridge.LoadAndRegisterAssemblyFrom(new java.io.File("S:\\JavaDev\\jninethelper\\JavaWrapper.j4n.dll"));
-//			        //Form1 f = new Form1 ( ) ;
-//			        javawrapper.Class1 f = new javawrapper.Class1  () ;
-//			        
-//					//MessageDialog.openInformation( PlatformUI.getWorkbench().getActiveWorkbenchWindow().getShell(),	"Hello",	f.getClassName() );
-//			        f.ShowTemplateManager();
-//			        //f.getClassName() ; 
-			        
-			        
-			        
-			    	
-//					Bridge.LoadAndRegisterAssemblyFrom(new File("S:\\JavaDev\\jninethelper\\winforms.dll"));
-//
-//					TestForm test=new TestForm();
-//					test.init();
-//					test.ShowDialog() ;			
-					
-					
-				}
-				catch (Exception exp)
-				{
-					MessageDialog.openInformation(
-							PlatformUI.getWorkbench().getActiveWorkbenchWindow().getShell(),
-							"Error",
-							exp.getMessage() );
-					
-				}
-			
-			
 			}
-		});
-				
-				
-				
-		btnTest.setBounds(485, 10, 75, 25);
-		toolkit.adapt(btnTest, true, true);
-		btnTest.setText("Test");
-		
-		chkDeleteAllFirst = new Button(container, SWT.CHECK);
-		chkDeleteAllFirst.setBounds(182, 67, 75, 16);
-		toolkit.adapt(chkDeleteAllFirst, true, true);
-		chkDeleteAllFirst.setText("Delete first");
-		
-		chkAddSystemFile = new Button(container, SWT.CHECK);
-		chkAddSystemFile.setBounds(290, 67, 93, 16);
-		toolkit.adapt(chkAddSystemFile, true, true);
-		chkAddSystemFile.setText("Add system files");
-		
-		chkKeepJNINetSystemFile = new Button(container, SWT.CHECK);
-		chkKeepJNINetSystemFile.setBounds(196, 95, 109, 16);
-		toolkit.adapt(chkKeepJNINetSystemFile, true, true);
-		chkKeepJNINetSystemFile.setText("Keep System File");
-		
-		Label lblNewLabel_1 = new Label(container, SWT.NONE);
-		lblNewLabel_1.setBounds(32, 31, 94, 15);
-		toolkit.adapt(lblNewLabel_1, true, true);
-		lblNewLabel_1.setText("Additional files");
-		
-		txtAdditionalFiles = new Text(container, SWT.BORDER);
-		txtAdditionalFiles.setBounds(132, 31, 298, 21);
-		toolkit.adapt(txtAdditionalFiles, true, true);
-		
-		Button btnTest1 = new Button(container, SWT.NONE);
-		btnTest1.addSelectionListener(new SelectionAdapter() {
+		};
+	}
+
+
+	private SelectionAdapter btnCopyOutput2ListenerDelegate() {
+		return new SelectionAdapter() {
 			@Override
 			public void widgetSelected(SelectionEvent e) {
+				
+				try
+				{
+					
+					SaveCurrentValue () ;
+
+				    String extension = cboExtension.getText() ;
+				    String TargetFolder = cboCopyTargetFolder.getText() ; 
+
+
+				    IProject project = getActiveProject () ;
+					
+					IBuildConfiguration buildconfig =  project.getActiveBuildConfig() ;
+					System.out.println( buildconfig.getName());
+					
+					IProjectNature nature =  project.getNature("org.eclipse.jdt.core.javanature" ) ;
+					if ( nature != null)
+					{
+						//JOptionPane.showMessageDialog(null, "Is Java nature", "Confirm", 1 );
+						System.out.println( nature.toString() );
+						if (  chkUseDetectedOutputExtension.getSelection() )
+							extension = "jar" ;
+
+					}
+					
+
+					IProjectNature natureAndroid =  project.getNature("com.android.ide.eclipse.adt.AndroidNature" ) ;
+					if ( natureAndroid != null)
+					{
+					    //JOptionPane.showMessageDialog(null, "Is Android nature", "Confirm", 1 );
+						System.out.println( natureAndroid.toString() );
+						if (  chkUseDetectedOutputExtension.getSelection() )
+							extension = "apk" ;
+
+					}
+
+					
+					IFile f = project.getFile("/bin/" + project.getName() + "." + extension ) ;
+				    String fileName =  f.getRawLocation().toOSString() ; 
+	
+					    
+			        File source = new File( fileName );
+				    String str = JOptionPane.showInputDialog("Enter FileName : ",  project.getName()  ) ;
+					if ( str == null)
+						return ;
+			        File dest = new File( String.format("%s\\%s.%s", TargetFolder, str, extension ));
+			 
+			        Files.copy(source.toPath(), dest.toPath(), REPLACE_EXISTING);
+				    JOptionPane.showMessageDialog(null, "done", "Success", 1 );
+		        
+		 
+		        }catch(Exception exp){
+		            exp.printStackTrace();
+		        }					
+			    SaveCurrentValue () ;
+				
+				
+			}
+		};
+	}
+
+
+	private SelectionAdapter btnTest1Listener() {
+		return new SelectionAdapter() {
+			@Override
+			public void widgetSelected(SelectionEvent e) {
+				
+				
 				
 				
 //				IFile[] files2 = ResourcesPlugin.getWorkspace().getRoot().getFilters().findFilesForLocationURI(new URI("file:/"+workingDirectory));
@@ -455,76 +882,143 @@ public class JNINETMainPart extends ViewPart {
 				
 				try {
 					
-					processContainer (getActiveProject (), lst , cboCurrentBuildConfig.getText()  , cboTargetBuildConfig.getText()  ) ;
+					IProject project = getActiveProject () ;
+					
+					IJavaProject javaProject = JavaCore.create( project );
+					 
+					//set the build path
+//					IClasspathEntry[] buildPath = {
+//							JavaCore.newSourceEntry(project.getFullPath().append("src")),
+//									JavaRuntime.getDefaultJREContainerEntry() };
+//					 
+//					javaProject.setRawClasspath(buildPath, project.getFullPath().append(
+//									"bin"), null);
+					 
+					//create folder by using resources package
+					IFolder folder = project.getFolder("src");
+						 
+					//Add folder to Java element
+					IPackageFragmentRoot srcFolder = javaProject.getPackageFragmentRoot(folder);
+					
+					String str = srcFolder.getPath().toString() ;
+					str = str.substring(1, str.length() - 4 ) ;
+					
+					System.out.println(str);
 					
 					
-				} catch (Exception e1) {
-					// TODO Auto-generated catch block
-					e1.printStackTrace();
-				}
-				
-				
-				
-			}
-		});
-		btnTest1.setBounds(580, 5, 75, 25);
-		toolkit.adapt(btnTest1, true, true);
-		btnTest1.setText("Test1");
-		
-		cboCurrentBuildConfig = new Combo(container, SWT.NONE);
-		cboCurrentBuildConfig.setBounds(400, 110, 182, 23);
-		toolkit.adapt(cboCurrentBuildConfig);
-		toolkit.paintBordersFor(cboCurrentBuildConfig);
-		
-		cboTargetBuildConfig = new Combo(container, SWT.NONE);
-		cboTargetBuildConfig.setBounds(640, 110, 158, 23);
-		toolkit.adapt(cboTargetBuildConfig);
-		toolkit.paintBordersFor(cboTargetBuildConfig);
-		
-		
-		//cboCurrentBuildConfig.add(string);
-		
-		Label lblNewLabel_2 = new Label(container, SWT.NONE);
-		lblNewLabel_2.setBounds(410, 69, 55, 15);
-		toolkit.adapt(lblNewLabel_2, true, true);
-		lblNewLabel_2.setText("Current ");
-		
-		Label lblNewLabel_3 = new Label(container, SWT.NONE);
-		lblNewLabel_3.setBounds(640, 67, 55, 15);
-		toolkit.adapt(lblNewLabel_3, true, true);
-		lblNewLabel_3.setText("Target");
-		
-		Button btnParseConfig = new Button(container, SWT.NONE);
-		btnParseConfig.addSelectionListener(new SelectionAdapter() {
-			@Override
-			public void widgetSelected(SelectionEvent e) {
-				try {
-					DOMParserDemo dom = new DOMParserDemo () ;
-					lst =  dom.parseBuildParam(  getActiveProject ().getFile("BuildParam.xml").getRawLocation ().toOSString()   );
-					for ( TextReplacement tp : lst)
+					
+					
+
+					try
+					
 					{
-						cboCurrentBuildConfig.add (tp.BuildName) ;
-						cboTargetBuildConfig.add (tp.BuildName) ;
+						 
+						//JOptionPane.showMessageDialog(null, System.getProperty("user.dir"), "", 1 );
+						 
+						Bridge.init( new java.io.File("s:\\Eclipse") ) ;
+					 	//Bridge.init();
+				        //Bridge.LoadAndRegisterAssemblyFrom(new java.io.File("S:\\JavaDev\\jninethelper\\jni4net.n-0.8.8.0.dll"));
+//				        Bridge.LoadAndRegisterAssemblyFrom(new java.io.File("S:\\AndroidGit\\jninethelper\\eclipse_net_lib.j4n.dll"));
+				        Bridge.LoadAndRegisterAssemblyFrom(new java.io.File("s:\\Eclipse\\eclipse_net_lib.j4n.dll"));
+						String str2 = XML2JavaCodeGenerator.GenerateClassDefinition(getActiveFile ().getRawLocation().toOSString() , "c:\\temp" ) ;
+						String str1 = XML2JavaCodeGenerator.GenerateMarshalCode( getActiveFile ().getRawLocation().toOSString() , "c:\\temp" ) ;
+						
+			            //MessageDialog.openInformation( PlatformUI.getWorkbench().getActiveWorkbenchWindow().getShell(), "Title", str2 );
+						String strs[] = str2.split(";") ;
+						for ( String strPath : strs )
+						{
+				            String fileName = Paths.get(strPath).getFileName().toString() ;
+				            //MessageDialog.openInformation( PlatformUI.getWorkbench().getActiveWorkbenchWindow().getShell(), "Title", fileName );
+					            
+							IFile f = project.getFile(  "src/" + fileName ) ;
+				            f.delete(true, null );
+				            Thread.sleep(100);
+				            f.create(new FileInputStream(strPath), true, null);
+							
+							
+							
+						}
+						IFile f1 = project.getFile( String.format("src/ObjectFromXML.java" ) ) ;
+			            f1.delete(true, null );
+			            Thread.sleep(100);
+			            f1.create(new FileInputStream(str1), true, null);
+						
+			            
+			            
+
+				        
 						
 					}
+					catch (Exception exp)
+					{
+						MessageDialog.openInformation(
+								PlatformUI.getWorkbench().getActiveWorkbenchWindow().getShell(),
+								"Error",
+								exp.getMessage() );
+						
+					}					
+					
+					
+					
+					
+					 
+					//create package fragment
+//					IPackageFragment fragment = srcFolder.createPackageFragment(
+//							"com.programcreek", true, null);
+//					 
+//					//init code string and create compilation unit
+//					String str = "package com.programcreek;" + "\n"
+//						+ "public class Test  {" + "\n" + " private String name;"
+//						+ "\n" + "}";
+//					 
+//							ICompilationUnit cu = fragment.createCompilationUnit("Test.java", str,
+//									false, null);					
+//					
+//	
+			        //System.out.println(employee.toString() ) ;
+					
+					//replaceText ( str, "org.micareo" , null ) ;x
+					
+					
+					
+					//replaceText (getActiveProject (), str, txtAdditionalFiles.getText() , null  ) ;
+					
+					//processContainer (getActiveProject (), lst , cboCurrentBuildConfig.getText()  , cboTargetBuildConfig.getText()  ) ;
+					
+					
 				} catch (Exception e1) {
 					// TODO Auto-generated catch block
 					e1.printStackTrace();
 				}
-
-			
+				
+				
+				
 			}
-		});
-		btnParseConfig.setBounds(688, 5, 93, 25);
-		toolkit.adapt(btnParseConfig, true, true);
-		btnParseConfig.setText("Parse Config");
-
-		createActions();
-		initializeToolBar();
-		initializeMenu();
+		};
 	}
 
 	
+	
+//	 void createJar(Shell parentShell) {
+//	 void createJar(Shell parentShell), IType mainType, IFile[] filestoExport) {
+	 void createJar(Shell parentShell, IFile[] filestoExport) {
+
+		    JarPackageData description= new JarPackageData();
+	        IPath location= (IPath) new org.eclipse.core.runtime.Path ("d:\\myjar.jar");
+	        description.setJarLocation(location);
+	        description.setSaveManifest(true);
+	        //description.setManifestMainClass(mainType);
+	        description.setElements(filestoExport);
+	        IJarExportRunnable runnable= description.createJarExportRunnable(parentShell);
+	        try {
+	            new ProgressMonitorDialog(parentShell).run(true,true, runnable);
+	        } catch (InvocationTargetException e) {
+	            // An error has occurred while executing the operation
+	        } catch (InterruptedException e) {
+	            // operation has been canceled.
+	        }
+	    }
+	 
 	
 	IProject getActiveProject ()
 	{
@@ -549,49 +1043,128 @@ public class JNINETMainPart extends ViewPart {
 		
 	}
 	
-	void processContainer(IContainer container, List<TextReplacement> lst, String fromBuild, String toBuild ) throws CoreException
+
+	
+	IFile getActiveFile ()
+	{
+		
+			
+		IEditorPart  editorPart =
+				Activator.getDefault().getWorkbench().getActiveWorkbenchWindow().getActivePage().getActiveEditor();
+				//Activator.getDefault().getWorkbenchWindow().getActivePage().getActiveEditor();
+
+		if(editorPart  != null)
+		{
+		    IFileEditorInput input = (IFileEditorInput)editorPart.getEditorInput() ;
+		    return input.getFile();
+		    
+		}
+		else
+			
+			return null ;
+		
+		
+	}
+	
+	String getActiveFilePath (IFile ifile)
+	{
+		IFile f = getActiveFile () ;
+		return f.getFullPath().toOSString() ;
+		
+		
+	}
+	
+	
+	
+	void replaceText (IContainer container, String fromText, String toText, Object option ) throws CoreException
 	{
 	   IResource [] members = container.members();
 	   for (IResource member : members)
 	    {
 	       if (member instanceof IContainer)
-	         processContainer((IContainer)member, lst, fromBuild, toBuild );
+	    	   replaceText((IContainer)member, fromText, toText, option);
 	       else if (member instanceof IFile)
 	       {
 	    	   IFile f = (IFile)member ;
 	    	   String fullPath = f.getRawLocation ().toOSString() ;
 	    	   System.out.println( fullPath  );
+    		   replaceText ( fullPath, fromText, toText, true ) ;
 
-	    	   String fromText = null ;
-	    	   String toText = null ;
-	    	   
-	    	   for ( TextReplacement  tp : lst  )
-	    	   {
-	    		   
-		    	   if ( tp.FileName.endsWith(f.getName() ) && tp.BuildName.equals(toBuild ) )
-		    	   {
-		    		   fromText = getFromText ( lst, fromBuild, tp.ReplacementID) ;
-		    		   toText = tp.ToText ;
-		    		   replaceText ( fullPath, fromText, toText ) ;
-		    		   
-		    	   }
-	    		   
-	    	   }
+    		   
 	    	   
 	    	   
 	       }
 	    }
+	} 	
+	
+	
+	
+	void processContainer(IContainer container,  Build fromBuild, Build toBuild ) 
+	{
+		try
+		{
+			
+			   IResource [] members = container.members();
+			   for (IResource member : members)
+			    {
+			       if (member instanceof IContainer)
+			         processContainer((IContainer)member, fromBuild, toBuild );
+			       else if (member instanceof IFile)
+			       {
+			    	   IFile f = (IFile)member ;
+			    	   String fullPath = f.getRawLocation ().toOSString() ;
+			    	   System.out.println( fullPath  + " Charset = " + f.getCharset() );
+
+//			    	   if ( f.getName().contains( "a1.java"  ))
+//			    		   createJar (PlatformUI.getWorkbench().getActiveWorkbenchWindow().getShell(), new IFile [] { f }  ) ;
+			    	   
+			    	   
+			    	   if ( f.getCharset().startsWith("UTF") || f.getFullPath().getFileExtension() == "java" ) // 
+			    	   {
+			    		   
+			    		   
+				    	   String fromText = null ;
+				    	   String toText = null ;
+				    	   
+				    	   for ( TextReplacement  tp : fromBuild.lstTextReplacement  )
+				    	   {
+				    		   
+					    	   if ( tp.FileName.endsWith(f.getName() )  )
+					    	   {
+					    		   fromText = tp.toText ;
+					    		   toText =  getFromText ( toBuild, tp.ReplacementID) ;
+					    		   replaceText ( fullPath, fromText, toText, false ) ;
+					    		   
+					    	   }
+				    		   
+				    	   }
+			    		   
+			    	   }
+			    	   
+			    	   
+			    	   
+			       }
+			    }
+			
+			
+		}
+		
+		catch (Exception exp)
+		{
+			exp.printStackTrace(); 
+			
+		}
 	} 
 	
 	
 	
-	private String getFromText (  List<TextReplacement> lst, String buildName, String ReplacementID )
+	private String getFromText (  Build build, String ReplacementID )
 	{
 		
- 	   for ( TextReplacement  tp : lst  )
+ 	   for ( TextReplacement  tp : build.lstTextReplacement  )
 	   {
- 		   if ( tp.BuildName.equals( buildName) && tp.ReplacementID.equals(ReplacementID)  )
- 			   return tp.ToText  ;
+ 		   if ( tp.ReplacementID.equals(ReplacementID)  )
+ 			   return tp.toText  ;
  		   
 	   }
  	   
@@ -601,7 +1174,7 @@ public class JNINETMainPart extends ViewPart {
 		
 	}
 	
-	public void replaceText (String fileIn, String fromText, String toText )
+	public void replaceText (String fileIn, String fromText, String toText, boolean bWholeWord )
 	{
 		
 		Path path = Paths.get(fileIn);
@@ -611,8 +1184,16 @@ public class JNINETMainPart extends ViewPart {
 		try {
 			
 			content = new String(Files.readAllBytes(path), charset);
-			content = content.replaceAll(fromText, toText);
-			Files.write(path, content.getBytes(charset));	
+			String NewContent ;
+			
+			if ( bWholeWord )
+				NewContent = content.replaceAll("\\b" + fromText + "\\b", toText);
+			else
+				NewContent = content.replaceAll(fromText, toText);
+				
+				
+			if ( !NewContent.equals(content))
+				Files.write(path, NewContent.getBytes(charset));	
 
 		} catch (Exception e) {
 			// TODO Auto-generated catch block
@@ -653,4 +1234,43 @@ public class JNINETMainPart extends ViewPart {
 	public void setFocus() {
 		// Set the focus
 	}
+	
+	
+	public static String KEY_TARGET_PATH = "TargetPath" ;
+	public static String KEY_COPY_TARGET_FOLDER = "CopyTargetFolder" ;
+	public static String KEY_FILE_EXTENSION = "FileExtension" ;
+	public static String KEY_TARGET_BUILD_CONFIG = "TargetBuiildConfig" ;
+	public static String KEY_MULTIBUILD_TARGET_FOLDER = "MultiBuildTargetFolder" ;
+	private Composite composite_2;	
+	
+	private void SaveCurrentValue ()
+	{
+		
+		IEclipsePreferences preferences = InstanceScope.INSTANCE.getNode(Activator.PLUGIN_ID);
+
+		preferences.put(KEY_TARGET_PATH, this.txtDllPath.getText() );
+		preferences.put(KEY_COPY_TARGET_FOLDER, this.cboCopyTargetFolder.getText() );
+		preferences.put(KEY_FILE_EXTENSION, this.cboExtension.getText());
+		
+		preferences.put(KEY_TARGET_BUILD_CONFIG, this.cboTargetBuildConfig.getText());
+		preferences.put(KEY_MULTIBUILD_TARGET_FOLDER, this.cboMultiBuildTargetFolder.getText());
+		  
+		
+		
+	}
+	
+
+	private void RestoreCurrentValue ()
+	{
+		
+		IEclipsePreferences preferences = InstanceScope.INSTANCE.getNode(Activator.PLUGIN_ID);
+		this.txtDllPath.setText( preferences.get(KEY_TARGET_PATH, "c:\\temp") );
+		this.cboCopyTargetFolder.setText( preferences.get(KEY_COPY_TARGET_FOLDER, "c:\\temp") );
+		this.cboExtension.setText( preferences.get(KEY_FILE_EXTENSION, "jar") );
+		  
+		this.cboTargetBuildConfig.setText( preferences.get(KEY_TARGET_BUILD_CONFIG, "Not selected") );
+		this.cboMultiBuildTargetFolder.setText( preferences.get(KEY_MULTIBUILD_TARGET_FOLDER, "c:\\temp") );
+		
+		
+	}	
 }

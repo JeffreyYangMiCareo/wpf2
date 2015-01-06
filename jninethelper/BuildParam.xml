@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<BuildVersions>
+<buildVersions>
   
-   <Build Name="Base">
+   <Build Name="Base" BuildOutput="Base.jar" >
         <TextReplacement FileName="a1.java" ReplacementID="main" toText="xyy" />
         <TextReplacement FileName="a1.java" ReplacementID="class" toText="interface" />
         
@@ -10,14 +10,14 @@
     </Build>
     
    
-      <Build Name="Algorithm with filter1">
+      <Build Name="Algorithm with filter1" BuildOutput="filter1.jar" >
         <TextReplacement FileName="a1.java" ReplacementID="main" toText="xyyfilter1" />
         <TextReplacement FileName="a1.java" ReplacementID="class" toText="interfacefilter1" />
         
         
     </Build>
    
-   <Build Name="filter2">
+   <Build Name="filter2" BuildOutput="filter2.jar" >
         <TextReplacement FileName="a1.java" ReplacementID="main" toText="xyy2" />
         <TextReplacement FileName="a1.java" ReplacementID="class" toText="interface3" />
         
@@ -25,7 +25,7 @@
     </Build>
       
    
-    <Build Name="filter3">
+    <Build Name="filter3" BuildOutput="filter3.jar" >
         <TextReplacement FileName="a1.java" ReplacementID="main" toText="xyy3" />
         <TextReplacement FileName="a1.java" ReplacementID="class" toText="interface3" />
         
@@ -34,4 +34,4 @@
     
     
     
-</BuildVersions>
+</buildVersions>

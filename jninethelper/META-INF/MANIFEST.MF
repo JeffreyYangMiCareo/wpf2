@@ -15,4 +15,7 @@ Bundle-ActivationPolicy: lazy
 Bundle-ClassPath: jni4net.j-0.8.8.0.jar,
  ClassLibrary2.j4n.jar,
  .,
- JavaWrapper.j4n.jar
+ JavaWrapper.j4n.jar,
+ eclipse_net_lib.j4n.jar
+Import-Package: org.eclipse.jdt.core,
+ org.eclipse.jdt.ui.jarpackager
